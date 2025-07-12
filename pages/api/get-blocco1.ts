@@ -30,6 +30,16 @@ function calculateReturns(series: any[], days: number): number | null {
   return ((latest - past) / past) * 100;
 }
 
+function calculateHighLow(series: any[]): { max: number | null; min: number | null } {
+  if (!series || series.length === 0) return { max: null, min: null };
+  const highs = series.map(d => parseFloat(d.high)).filter(v => !isNaN(v));
+  const lows = series.map(d => parseFloat(d.low)).filter(v => !isNaN(v));
+  return {
+    max: Math.max(...highs),
+    min: Math.min(...lows),
+  };
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { symbol = '' } = req.query;
   if (!symbol || typeof symbol !== 'string') {
@@ -52,6 +62,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const series = timeSeriesData?.values || [];
     const variation_7d = calculateReturns(series, 7);
     const variation_30d = calculateReturns(series, 30);
+    const { max, min } = calculateHighLow(series);
 
     return res.status(200).json({
       ticker: symbol,
@@ -62,6 +73,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       price: priceData || null,
       variation_7d,
       variation_30d,
+      max_30d: max,
+      min_30d: min,
       max_all_time: null,  // scraping esterno
       min_all_time: null,  // scraping esterno
       note_max_min: "Dati massimo/minimo storico esclusi perché saranno ottenuti via scraping esterno"
