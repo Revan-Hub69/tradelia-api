@@ -1,4 +1,3 @@
-// pages/api/get-blocco1.ts
 import type { NextApiRequest, NextApiResponse } from 'next'
 
 const BASE_URL = 'https://query1.finance.yahoo.com'
@@ -20,53 +19,63 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     ])
 
     const data = quoteSummary?.quoteSummary?.result?.[0] || {}
+    const price = data?.price || {}
+    const summaryDetail = data?.summaryDetail || {}
+    const statistics = data?.defaultKeyStatistics || {}
+    const profile = data?.summaryProfile || {}
+    const quoteType = data?.quoteType || {}
+    const recommendation = data?.recommendationTrend?.trend?.[0] || {}
 
-    const prices = chart1mo?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || []
-    const changes: { change7d: number | null; change30d: number | null } = {
-      change7d: null,
-      change30d: null
-    }
+    // Prezzi 1 mese per variazioni % (ultima chiusura)
+    const prices: (number | null | undefined)[] = chart1mo?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || []
+    const change24h = prices.length >= 2 && prices[prices.length - 1] && prices[prices.length - 2]
+      ? ((prices[prices.length - 1]! - prices[prices.length - 2]!) / prices[prices.length - 2]!) * 100
+      : null
 
-    if (prices.length >= 31) {
-      const today = prices[prices.length - 1]
-      const day7 = prices[prices.length - 8]
-      const day30 = prices[prices.length - 31]
-      if (day7 && day30) {
-        changes.change7d = ((today - day7) / day7) * 100
-        changes.change30d = ((today - day30) / day30) * 100
-      }
-    }
+    const change7d = prices.length >= 8 && prices[prices.length - 8] && prices[prices.length - 1]
+      ? ((prices[prices.length - 1]! - prices[prices.length - 8]!) / prices[prices.length - 8]!) * 100
+      : null
 
+    const change30d = prices.length >= 31 && prices[prices.length - 31] && prices[prices.length - 1]
+      ? ((prices[prices.length - 1]! - prices[prices.length - 31]!) / prices[prices.length - 31]!) * 100
+      : null
+
+    // Prezzi storici completi per High/Low
     const allPrices = chartMax?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || []
-    const allTimeHigh = allPrices.length ? Math.max(...allPrices.filter(p => p != null)) : null
-    const allTimeLow = allPrices.length ? Math.min(...allPrices.filter(p => p != null)) : null
+    const validPrices = allPrices.filter((p: number | null): p is number => p !== null && p !== undefined)
+    const allTimeHigh = validPrices.length ? Math.max(...validPrices) : null
+    const allTimeLow = validPrices.length ? Math.min(...validPrices) : null
 
     res.status(200).json({
       ticker: symbol,
-      isin: null,
-      exchange: data.price?.exchangeName || null,
-      sector: data.summaryProfile?.sector || null,
-      industry: data.summaryProfile?.industry || null,
-      indexPrimary: null,
-      indexSecondary: null,
-      currentPrice: data.price?.regularMarketPrice?.raw || null,
-      targetPrice: data.financialData?.targetMeanPrice?.raw || null,
-      analystRating: data.recommendationTrend?.trend?.[0] || null,
-      marketCap: data.price?.marketCap?.raw || null,
-      sharesOutstanding: data.defaultKeyStatistics?.sharesOutstanding?.raw || null,
-      freeFloat: null,
-      week52High: data.summaryDetail?.fiftyTwoWeekHigh?.raw || null,
-      week52Low: data.summaryDetail?.fiftyTwoWeekLow?.raw || null,
-      change24h: data.price?.regularMarketChangePercent?.raw || null,
-      change7d: changes.change7d,
-      change30d: changes.change30d,
+      isin: statistics?.isin || null,
+      exchange: price?.exchangeName || null,
+      sector: profile?.sector || null,
+      industry: profile?.industry || null,
+      indexPrimary: quoteType?.market || null, // es. us_market
+      indexSecondary: null, // non disponibile via Yahoo diretto
+      currentPrice: price?.regularMarketPrice?.raw || null,
+      targetPrice: financialOrNull(data?.financialData?.targetMeanPrice),
+      analystRating: recommendation?.rating || null,
+      marketCap: price?.marketCap?.raw || null,
+      sharesOutstanding: statistics?.sharesOutstanding?.raw || null,
+      freeFloat: statistics?.floatShares?.raw || null,
+      week52High: summaryDetail?.fiftyTwoWeekHigh?.raw || null,
+      week52Low: summaryDetail?.fiftyTwoWeekLow?.raw || null,
+      change24h,
+      change7d,
+      change30d,
       allTimeHigh,
       allTimeLow,
-      ipoDate: data.price?.ipoExpectedDate || null,
-      currency: data.price?.currency || null,
-      country: data.summaryProfile?.country || null
+      ipoDate: statistics?.ipoDate?.fmt || null,
+      currency: price?.currency || null,
+      country: profile?.country || null
     })
   } catch (error: any) {
-    res.status(500).json({ error: 'Errore durante il recupero dei dati da Yahoo Finance', dettaglio: error.message })
+    res.status(500).json({ error: 'Errore durante il recupero dati Yahoo Finance', detail: error.message })
   }
+}
+
+function financialOrNull(field: any): number | null {
+  return typeof field?.raw === 'number' ? field.raw : null
 }
