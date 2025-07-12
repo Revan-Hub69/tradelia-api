@@ -1,63 +1,112 @@
-import type { NextApiRequest, NextApiResponse } from 'next'
+// /api/get-blocco1.ts
 
-const BASE = 'https://query1.finance.yahoo.com'
+import type { NextApiRequest, NextApiResponse } from 'next';
+
+const FMP_API_KEY = process.env.FMP_API_KEY!;
+const TWELVE_API_KEY = process.env.TWELVE_API_KEY!;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const symbol = (req.query.symbol as string)?.toUpperCase() || 'AAPL'
+  const symbol = req.query.symbol as string;
+  if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
 
   try {
-    const [quoteSummaryRes, chart1moRes, chartMaxRes] = await Promise.all([
-      fetch(`${BASE}/v10/finance/quoteSummary/${symbol}?modules=summaryProfile,price,financialData,defaultKeyStatistics,summaryDetail,quoteType,recommendationTrend`),
-      fetch(`${BASE}/v8/finance/chart/${symbol}?range=1mo&interval=1d`),
-      fetch(`${BASE}/v8/finance/chart/${symbol}?range=max&interval=1d`)
-    ])
+    const [yahoo, fmp, twelve] = await Promise.all([
+      fetchYahoo(symbol),
+      fetchFMP(symbol),
+      fetchTwelve(symbol)
+    ]);
 
-    const [quoteSummaryJson, chart1moJson, chartMaxJson] = await Promise.all([
-      quoteSummaryRes.json(),
-      chart1moRes.json(),
-      chartMaxRes.json()
-    ])
-
-    const data = quoteSummaryJson.quoteSummary.result[0]
-    const priceHistory = chart1moJson.chart.result[0].indicators.quote[0].close
-    const priceMaxHistory = chartMaxJson.chart.result[0].indicators.quote[0].close
-
-    const response = {
+    const data = {
       ticker: symbol,
-      isin: null, // ❌ Non disponibile
-      exchange: data.quoteType.exchange,
-      settore: data.summaryProfile?.sector,
-      industria: data.summaryProfile?.industry,
-      indicePrimario: null, // ⚠️ Da stimare via GPT/scraping
-      indiciSecondari: null, // ⚠️ Da stimare via GPT/scraping
-      prezzoAttuale: data.price.regularMarketPrice?.raw,
-      prezzoTargetMedio: data.financialData.targetMeanPrice?.raw,
-      ratingAnalisti: data.recommendationTrend.trend[0],
-      marketCap: data.price.marketCap?.raw,
-      numeroAzioni: data.defaultKeyStatistics.sharesOutstanding?.raw,
-      freeFloat: data.defaultKeyStatistics.floatShares?.raw,
-      min52w: data.summaryDetail.fiftyTwoWeekLow?.raw,
-      max52w: data.summaryDetail.fiftyTwoWeekHigh?.raw,
-      variazione24h: data.price.regularMarketChangePercent?.raw,
-      variazione7gg: calcVariation(priceHistory, 7),
-      variazione30gg: calcVariation(priceHistory, 30),
-      maxStorico: Math.max(...priceMaxHistory),
-      minStorico: Math.min(...priceMaxHistory),
-      dataIPO: null, // ⚠️ Non disponibile in questi moduli
-      valuta: data.price.currency,
-      paese: data.summaryProfile.country
-    }
+      isin: fmp?.isin || null,
+      exchange: yahoo?.exchange || null,
+      sector: yahoo?.sector || fmp?.sector || null,
+      industry: yahoo?.industry || fmp?.industry || null,
+      indexPrimary: null,
+      indexSecondary: null,
+      currentPrice: yahoo?.price || twelve?.price || null,
+      targetPrice: yahoo?.targetPrice || null,
+      analystRating: yahoo?.analystRating || null,
+      marketCap: yahoo?.marketCap || null,
+      sharesOutstanding: fmp?.sharesOutstanding || null,
+      freeFloat: fmp?.freeFloat || null,
+      week52High: yahoo?.week52High || null,
+      week52Low: yahoo?.week52Low || null,
+      change24h: yahoo?.change24h || null,
+      change7d: twelve?.change7d || null,
+      change30d: twelve?.change30d || null,
+      allTimeHigh: null,
+      allTimeLow: null,
+      ipoDate: fmp?.ipoDate || null,
+      currency: yahoo?.currency || null,
+      country: yahoo?.country || fmp?.country || null
+    };
 
-    res.status(200).json(response)
-  } catch (err: any) {
-    res.status(500).json({ error: 'Errore blocco 1', message: err.message })
+    res.status(200).json(data);
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to fetch data' });
   }
 }
 
-function calcVariation(prices: number[], days: number): number | null {
-  if (!prices || prices.length < days) return null
-  const latest = prices[prices.length - 1]
-  const past = prices[prices.length - days]
-  if (!latest || !past) return null
-  return ((latest - past) / past) * 100
+// -----------------------------
+
+async function fetchYahoo(symbol: string) {
+  try {
+    const res = await fetch(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=price,summaryProfile,financialData`);
+    const json = await res.json();
+    const d = json?.quoteSummary?.result?.[0];
+    return {
+      price: d?.price?.regularMarketPrice?.raw,
+      exchange: d?.price?.exchangeName,
+      currency: d?.price?.currency,
+      marketCap: d?.price?.marketCap?.raw,
+      analystRating: d?.financialData?.recommendationMean?.fmt,
+      targetPrice: d?.financialData?.targetMeanPrice?.raw,
+      sector: d?.summaryProfile?.sector,
+      industry: d?.summaryProfile?.industry,
+      country: d?.summaryProfile?.country,
+      week52High: d?.summaryDetail?.fiftyTwoWeekHigh?.raw,
+      week52Low: d?.summaryDetail?.fiftyTwoWeekLow?.raw,
+      change24h: d?.price?.regularMarketChangePercent?.raw
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function fetchFMP(symbol: string) {
+  try {
+    const res = await fetch(`https://financialmodelingprep.com/api/v3/profile/${symbol}?apikey=${FMP_API_KEY}`);
+    const json = await res.json();
+    const d = json?.[0];
+    return {
+      isin: d?.isin,
+      sector: d?.sector,
+      industry: d?.industry,
+      ipoDate: d?.ipoDate,
+      sharesOutstanding: d?.sharesOutstanding,
+      freeFloat: d?.floatShares,
+      country: d?.country
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function fetchTwelve(symbol: string) {
+  try {
+    const res = await fetch(`https://api.twelvedata.com/time_series?symbol=${symbol}&interval=1day&outputsize=30&apikey=${TWELVE_API_KEY}`);
+    const json = await res.json();
+    const prices = json?.values?.map((v: any) => parseFloat(v.close)).reverse();
+    if (!prices || prices.length < 2) return {};
+    const change7d = ((prices[prices.length - 1] - prices[prices.length - 8]) / prices[prices.length - 8]) * 100;
+    const change30d = ((prices[prices.length - 1] - prices[0]) / prices[0]) * 100;
+    return {
+      price: parseFloat(json?.values?.[0]?.close),
+      change7d,
+      change30d
+    };
+  } catch {
+    return {};
+  }
 }
