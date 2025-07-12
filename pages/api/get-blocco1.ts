@@ -3,96 +3,98 @@ import axios from 'axios';
 
 const API_KEY = process.env.RAPIDAPI_KEY!;
 const BASE_URL = 'https://live-stock-market.p.rapidapi.com';
-
 const headers = {
   'x-rapidapi-key': API_KEY,
   'x-rapidapi-host': 'live-stock-market.p.rapidapi.com',
 };
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse
-) {
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { symbol, region = 'US' } = req.query;
 
   try {
-    const profile = await axios.get(
-      `${BASE_URL}/v1/stock/profile?symbol=${symbol}&region=${region}`,
-      { headers }
-    );
+    // 1. PROFILE
+    const profileRes = await axios.get(`${BASE_URL}/v1/stock/profile?symbol=${symbol}&region=${region}`, {
+      headers,
+      responseType: 'text',
+    });
+    const profile = JSON.parse(profileRes.data);
+    await sleep(150);
 
-    await new Promise((r) => setTimeout(r, 200)); // delay 200ms
+    // 2. SUMMARY
+    const summaryRes = await axios.get(`${BASE_URL}/v1/stock/summary?symbol=${symbol}&region=${region}`, {
+      headers,
+      responseType: 'text',
+    });
+    const summary = JSON.parse(summaryRes.data);
+    await sleep(150);
 
-    const summary = await axios.get(
-      `${BASE_URL}/v1/stock/summary?symbol=${symbol}&region=${region}`,
-      { headers }
-    );
+    // 3. ANALYSIS
+    const analysisRes = await axios.get(`${BASE_URL}/v1/stock/analysis?symbol=${symbol}&region=${region}`, {
+      headers,
+      responseType: 'text',
+    });
+    const analysis = JSON.parse(analysisRes.data);
+    await sleep(150);
 
-    await new Promise((r) => setTimeout(r, 200));
+    // 4. STATISTICS
+    const statsRes = await axios.get(`${BASE_URL}/v1/stock/key-statistics?symbol=${symbol}&region=${region}`, {
+      headers,
+      responseType: 'text',
+    });
+    const stats = JSON.parse(statsRes.data);
+    await sleep(150);
 
-    const analysis = await axios.get(
-      `${BASE_URL}/v1/stock/analysis?symbol=${symbol}&region=${region}`,
-      { headers }
-    );
-
-    await new Promise((r) => setTimeout(r, 200));
-
-    const stats = await axios.get(
-      `${BASE_URL}/v1/stock/key-statistics?symbol=${symbol}&region=${region}`,
-      { headers }
-    );
-
-    await new Promise((r) => setTimeout(r, 200));
-
+    // 5. HISTORICAL DATA
     const nowEpoch = Math.floor(Date.now() / 1000);
-    const hist = await axios.get(
-      `${BASE_URL}/v1/stock/historical-data?symbol=${symbol}&interval=1d&region=${region}&period1=0&period2=${nowEpoch}`,
-      { headers }
-    );
+    const histRes = await axios.get(`${BASE_URL}/v1/stock/historical-data?symbol=${symbol}&interval=1d&region=${region}&period1=0&period2=${nowEpoch}`, {
+      headers,
+      responseType: 'text',
+    });
+    const hist = JSON.parse(histRes.data);
 
-    // Process responses
-    const summaryData = summary.data;
-    const profileData = profile.data;
-    const analysisData = analysis.data;
-    const statsData = stats.data;
-    const histData = hist.data;
-
-    const prices = histData.prices?.map((p: any) => p.close).filter(Boolean) || [];
+    // Calcoli variazioni % e massimo/minimo storico
+    const prices = hist.prices?.map((p: any) => p.close).filter(Boolean) || [];
     const maxPrice = Math.max(...prices);
     const minPrice = Math.min(...prices);
     const pctChange = (a: number, b: number) => b ? ((a - b) / b) * 100 : null;
 
+    // Output finale
     res.status(200).json({
       ticker: symbol,
-      isin: profileData.isin,
-      exchange: summaryData.exchangeName,
-      settore: profileData.sector,
-      industria: profileData.industry,
-      indicePrimario: null,
-      indiciSecondari: null,
-      prezzoAttuale: summaryData.regularMarketPrice,
-      prezzoTarget: analysisData.targetMeanPrice,
-      ratingAnalisti: analysisData.rating,
-      marketCap: summaryData.marketCap,
-      numeroAzioni: statsData.sharesOutstanding,
-      freeFloat: statsData.floatShares && statsData.sharesOutstanding
-        ? (statsData.floatShares / statsData.sharesOutstanding) * 100
+      isin: profile.isin,
+      exchange: summary.exchangeName,
+      settore: profile.sector,
+      industria: profile.industry,
+      indicePrimario: null, // da completare con index-components
+      indiciSecondari: null, // opzionale
+      prezzoAttuale: summary.regularMarketPrice,
+      prezzoTarget: analysis.targetMeanPrice,
+      ratingAnalisti: analysis.rating,
+      marketCap: summary.marketCap,
+      numeroAzioni: stats.sharesOutstanding,
+      freeFloat: stats.floatShares && stats.sharesOutstanding
+        ? (stats.floatShares / stats.sharesOutstanding) * 100
         : null,
-      prezzoMin52w: summaryData.fiftyTwoWeekLow,
-      prezzoMax52w: summaryData.fiftyTwoWeekHigh,
-      var24h: summaryData.regularMarketChangePercent,
+      prezzoMin52w: summary.fiftyTwoWeekLow,
+      prezzoMax52w: summary.fiftyTwoWeekHigh,
+      var24h: summary.regularMarketChangePercent,
       var7d: pctChange(prices[0], prices[7]),
       var30d: pctChange(prices[0], prices[30]),
       massimoStorico: maxPrice,
       minimoStorico: minPrice,
-      dataIPO: profileData.ipoDate,
-      valuta: summaryData.currency,
-      paese: profileData.country,
+      dataIPO: profile.ipoDate,
+      valuta: summary.currency,
+      paese: profile.country,
     });
+
   } catch (e: any) {
     console.error('[ERRORE BLOCCO 1]', e?.response?.status, e?.response?.data);
     res.status(500).json({
-      error: `Errore BLOCCO 1: ${e?.response?.status} - ${e?.response?.data?.message || e.message}`,
+      error: `Errore BLOCCO 1: ${e?.response?.status} - ${e?.response?.data || e.message}`,
     });
   }
 }
