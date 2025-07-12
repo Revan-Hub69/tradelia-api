@@ -1,62 +1,81 @@
+// pages/api/get-blocco1.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
+const FMP_API_KEY = process.env.FMP_API_KEY!;
+const TWELVE_API_KEY = process.env.TWELVE_API_KEY!;
+
 const headers = {
-  'x-rapidapi-key': process.env.RAPIDAPI_KEY!,
-  'x-rapidapi-host': 'live-stock-market.p.rapidapi.com',
+  'Content-Type': 'application/json',
 };
 
-const BASE_URL = 'https://live-stock-market.p.rapidapi.com';
+async function fetchFMP(path: string) {
+  const url = `https://financialmodelingprep.com/api/v3/${path}&apikey=${FMP_API_KEY}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`FMP error: ${res.status}`);
+  return res.json();
+}
+
+async function fetchTwelve(path: string) {
+  const url = `https://api.twelvedata.com/${path}&apikey=${TWELVE_API_KEY}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Twelve error: ${res.status}`);
+  return res.json();
+}
+
+function calculateReturns(series: any[], days: number): number | null {
+  if (!series || series.length < days + 1) return null;
+  const latest = parseFloat(series[0].close);
+  const past = parseFloat(series[days].close);
+  if (!latest || !past) return null;
+  return ((latest - past) / past) * 100;
+}
+
+function calculateHighLow(series: any[]): { max: number | null; min: number | null } {
+  if (!series || series.length === 0) return { max: null, min: null };
+  const highs = series.map(d => parseFloat(d.high)).filter(v => !isNaN(v));
+  const lows = series.map(d => parseFloat(d.low)).filter(v => !isNaN(v));
+  return {
+    max: Math.max(...highs),
+    min: Math.min(...lows),
+  };
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (!process.env.RAPIDAPI_KEY) {
-    return res.status(500).json({ error: 'RapidAPI key non definita' });
+  const { symbol = '' } = req.query;
+  if (!symbol || typeof symbol !== 'string') {
+    return res.status(400).json({ error: 'Missing symbol' });
   }
 
-  const { symbol = '', region = 'US' } = req.query;
-
   try {
-    const suggestRes = await fetch(`${BASE_URL}/v1/search-suggest?q=${symbol}&region=${region}`, { headers });
-    if (!suggestRes.ok) throw new Error(`Errore search-suggest: ${suggestRes.status}`);
-    const suggestData = await suggestRes.json();
-    const suggest = suggestData?.quotes?.[0];
+    const [profile, quote, rating, ratios] = await Promise.all([
+      fetchFMP(`profile/${symbol}?`),
+      fetchFMP(`quote/${symbol}?`),
+      fetchFMP(`rating/${symbol}?`),
+      fetchFMP(`ratios-ttm/${symbol}?`),
+    ]);
 
-    if (!suggest) return res.status(404).json({ error: 'Simbolo non trovato' });
+    const [priceData, timeSeriesData] = await Promise.all([
+      fetchTwelve(`quote?symbol=${symbol}`),
+      fetchTwelve(`time_series?symbol=${symbol}&interval=1day&outputsize=30`),
+    ]);
 
-    const summaryRes = await fetch(`${BASE_URL}/v1/market/summary?market=US&region=${region}`, { headers });
-    if (!summaryRes.ok) throw new Error(`Errore market-summary: ${summaryRes.status}`);
-    const summaryData = await summaryRes.json();
-    const market = summaryData?.marketSummaryResponse?.result ?? [];
-
-    const main = market.find((s: any) => s.symbol === symbol || s.symbol?.includes(symbol)) || {};
+    const series = timeSeriesData?.values || [];
+    const var7d = calculateReturns(series, 7);
+    const var30d = calculateReturns(series, 30);
+    const { max, min } = calculateHighLow(series);
 
     return res.status(200).json({
-      ticker: suggest.symbol,
-      exchange: suggest.exchange,
-      settore: suggest.sector || null,
-      industria: suggest.industry || null,
-      prezzoAttuale: main?.regularMarketPrice?.raw || null,
-      var24h: main?.regularMarketChangePercent?.raw || null,
-      valuta: main?.currency || suggest.currency || null,
-      isin: null,
-      indicePrimario: null,
-      indiciSecondari: null,
-      prezzoTarget: null,
-      ratingAnalisti: null,
-      marketCap: null,
-      numeroAzioni: null,
-      freeFloat: null,
-      prezzoMin52w: null,
-      prezzoMax52w: null,
-      var7d: null,
-      var30d: null,
-      massimoStorico: null,
-      minimoStorico: null,
-      dataIPO: null,
-      paese: suggest.country || null
+      profile: profile[0] || null,
+      quote: quote[0] || null,
+      rating: rating[0] || null,
+      ratios: ratios[0] || null,
+      price: priceData || null,
+      variation_7d: var7d,
+      variation_30d: var30d,
+      max_30d: max,
+      min_30d: min,
     });
-
-  } catch (err: any) {
-    console.error('❌ BLOCCO 1 API ERROR:', err.message);
-    res.status(500).json({ error: `Blocco 1 errore: ${err.message}` });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
   }
 }
