@@ -5,77 +5,92 @@ const BASE_URL = 'https://query1.finance.yahoo.com'
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const symbol = (req.query.symbol as string)?.toUpperCase() || 'AAPL'
 
-  try {
-    const [quoteSummaryRes, chart1moRes, chartMaxRes] = await Promise.all([
-      fetch(`${BASE_URL}/v10/finance/quoteSummary/${symbol}?modules=summaryProfile,price,financialData,defaultKeyStatistics,summaryDetail,quoteType,recommendationTrend`),
-      fetch(`${BASE_URL}/v8/finance/chart/${symbol}?range=1mo&interval=1d`),
-      fetch(`${BASE_URL}/v8/finance/chart/${symbol}?range=max&interval=1d`)
-    ])
+  const modules = [
+    'price',
+    'summaryDetail',
+    'summaryProfile',
+    'financialData',
+    'defaultKeyStatistics',
+    'quoteType',
+    'recommendationTrend'
+  ]
 
-    const [quoteSummary, chart1mo, chartMax] = await Promise.all([
-      quoteSummaryRes.json(),
-      chart1moRes.json(),
-      chartMaxRes.json()
-    ])
+  let yahooData: any = {}
 
-    const data = quoteSummary?.quoteSummary?.result?.[0] || {}
-    const price = data?.price || {}
-    const summaryDetail = data?.summaryDetail || {}
-    const statistics = data?.defaultKeyStatistics || {}
-    const profile = data?.summaryProfile || {}
-    const quoteType = data?.quoteType || {}
-    const recommendation = data?.recommendationTrend?.trend?.[0] || {}
-
-    // Prezzi 1 mese per variazioni % (ultima chiusura)
-    const prices: (number | null | undefined)[] = chart1mo?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || []
-    const change24h = prices.length >= 2 && prices[prices.length - 1] && prices[prices.length - 2]
-      ? ((prices[prices.length - 1]! - prices[prices.length - 2]!) / prices[prices.length - 2]!) * 100
-      : null
-
-    const change7d = prices.length >= 8 && prices[prices.length - 8] && prices[prices.length - 1]
-      ? ((prices[prices.length - 1]! - prices[prices.length - 8]!) / prices[prices.length - 8]!) * 100
-      : null
-
-    const change30d = prices.length >= 31 && prices[prices.length - 31] && prices[prices.length - 1]
-      ? ((prices[prices.length - 1]! - prices[prices.length - 31]!) / prices[prices.length - 31]!) * 100
-      : null
-
-    // Prezzi storici completi per High/Low
-    const allPrices = chartMax?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || []
-    const validPrices = allPrices.filter((p: number | null): p is number => p !== null && p !== undefined)
-    const allTimeHigh = validPrices.length ? Math.max(...validPrices) : null
-    const allTimeLow = validPrices.length ? Math.min(...validPrices) : null
-
-    res.status(200).json({
-      ticker: symbol,
-      isin: statistics?.isin || null,
-      exchange: price?.exchangeName || null,
-      sector: profile?.sector || null,
-      industry: profile?.industry || null,
-      indexPrimary: quoteType?.market || null, // es. us_market
-      indexSecondary: null, // non disponibile via Yahoo diretto
-      currentPrice: price?.regularMarketPrice?.raw || null,
-      targetPrice: financialOrNull(data?.financialData?.targetMeanPrice),
-      analystRating: recommendation?.rating || null,
-      marketCap: price?.marketCap?.raw || null,
-      sharesOutstanding: statistics?.sharesOutstanding?.raw || null,
-      freeFloat: statistics?.floatShares?.raw || null,
-      week52High: summaryDetail?.fiftyTwoWeekHigh?.raw || null,
-      week52Low: summaryDetail?.fiftyTwoWeekLow?.raw || null,
-      change24h,
-      change7d,
-      change30d,
-      allTimeHigh,
-      allTimeLow,
-      ipoDate: statistics?.ipoDate?.fmt || null,
-      currency: price?.currency || null,
-      country: profile?.country || null
-    })
-  } catch (error: any) {
-    res.status(500).json({ error: 'Errore durante il recupero dati Yahoo Finance', detail: error.message })
+  for (const mod of modules) {
+    try {
+      const resMod = await fetch(`${BASE_URL}/v10/finance/quoteSummary/${symbol}?modules=${mod}`)
+      const json = await resMod.json()
+      const result = json?.quoteSummary?.result?.[0]
+      if (result) {
+        yahooData = { ...yahooData, ...result }
+      }
+    } catch (err) {
+      console.warn(`❌ Modulo Yahoo "${mod}" fallito`)
+    }
   }
-}
 
-function financialOrNull(field: any): number | null {
-  return typeof field?.raw === 'number' ? field.raw : null
+  // Chart per change 7d, 30d e max/min storico
+  let change24h = null
+  let change7d = null
+  let change30d = null
+  let allTimeHigh = null
+  let allTimeLow = null
+
+  try {
+    const chart1moRes = await fetch(`${BASE_URL}/v8/finance/chart/${symbol}?range=1mo&interval=1d`)
+    const chartMaxRes = await fetch(`${BASE_URL}/v8/finance/chart/${symbol}?range=max&interval=1d`)
+    const chart1mo = await chart1moRes.json()
+    const chartMax = await chartMaxRes.json()
+
+    const prices = chart1mo?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || []
+    if (prices.length >= 2) {
+      const today = prices[prices.length - 1]
+      const prev = prices[prices.length - 2]
+      if (today && prev) change24h = ((today - prev) / prev) * 100
+    }
+    if (prices.length >= 8) {
+      const day7 = prices[prices.length - 8]
+      if (day7) change7d = ((prices[prices.length - 1] - day7) / day7) * 100
+    }
+    if (prices.length >= 31) {
+      const day30 = prices[prices.length - 31]
+      if (day30) change30d = ((prices[prices.length - 1] - day30) / day30) * 100
+    }
+
+    const allPrices = chartMax?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || []
+    if (allPrices.length) {
+      const validPrices = allPrices.filter((p: number | null) => p != null)
+      allTimeHigh = Math.max(...validPrices)
+      allTimeLow = Math.min(...validPrices)
+    }
+  } catch (err) {
+    console.warn('❌ Errore durante il fetch di chart Yahoo')
+  }
+
+  res.status(200).json({
+    ticker: symbol,
+    isin: null, // Yahoo non fornisce
+    exchange: yahooData?.price?.exchangeName || null,
+    sector: yahooData?.summaryProfile?.sector || null,
+    industry: yahooData?.summaryProfile?.industry || null,
+    indexPrimary: null, // Richiede scraping o altre fonti
+    indexSecondary: null,
+    currentPrice: yahooData?.price?.regularMarketPrice || null,
+    targetPrice: yahooData?.financialData?.targetMeanPrice || null,
+    analystRating: yahooData?.recommendationTrend?.trend?.[0]?.ratingBuy ? 'Buy' : null,
+    marketCap: yahooData?.price?.marketCap || null,
+    sharesOutstanding: yahooData?.defaultKeyStatistics?.sharesOutstanding || null,
+    freeFloat: yahooData?.defaultKeyStatistics?.floatShares || null,
+    week52High: yahooData?.summaryDetail?.fiftyTwoWeekHigh || null,
+    week52Low: yahooData?.summaryDetail?.fiftyTwoWeekLow || null,
+    change24h,
+    change7d,
+    change30d,
+    allTimeHigh,
+    allTimeLow,
+    ipoDate: yahooData?.summaryProfile?.ipoDate || null,
+    currency: yahooData?.price?.currency || null,
+    country: yahooData?.summaryProfile?.country || null
+  })
 }
