@@ -14,7 +14,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   // Fetch Yahoo
   try {
-    const yahooRes = await fetch(\`https://query1.finance.yahoo.com/v10/finance/quoteSummary/\${symbol}?modules=price,summaryDetail,defaultKeyStatistics,assetProfile,financialData\`)
+const yahooRes = await fetch(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=price,summaryDetail,defaultKeyStatistics,assetProfile,financialData`)
     const yahooJson = await yahooRes.json()
     yahooData = yahooJson.quoteSummary?.result?.[0] || {}
   } catch (err) {
