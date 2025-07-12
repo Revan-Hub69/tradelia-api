@@ -4,26 +4,53 @@ import axios from 'axios';
 const API_KEY = process.env.RAPIDAPI_KEY!;
 const BASE_URL = 'https://live-stock-market.p.rapidapi.com';
 
+const headers = {
+  'x-rapidapi-key': API_KEY,
+  'x-rapidapi-host': 'live-stock-market.p.rapidapi.com',
+};
+
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
   const { symbol, region = 'US' } = req.query;
 
-  const headers = {
-    'x-rapidapi-key': API_KEY,
-    'x-rapidapi-host': 'live-stock-market.p.rapidapi.com',
-  };
-
   try {
-    const [profile, summary, analysis, stats, hist] = await Promise.all([
-      axios.get(`${BASE_URL}/v1/stock/profile?symbol=${symbol}&region=${region}`, { headers }),
-      axios.get(`${BASE_URL}/v1/stock/summary?symbol=${symbol}&region=${region}`, { headers }),
-      axios.get(`${BASE_URL}/v1/stock/analysis?symbol=${symbol}&region=${region}`, { headers }),
-      axios.get(`${BASE_URL}/v1/stock/key-statistics?symbol=${symbol}&region=${region}`, { headers }),
-      axios.get(`${BASE_URL}/v1/stock/historical-data?symbol=${symbol}&interval=1d&region=${region}&period1=0&period2=${Math.floor(Date.now() / 1000)}`, { headers }),
-    ]);
+    const profile = await axios.get(
+      `${BASE_URL}/v1/stock/profile?symbol=${symbol}&region=${region}`,
+      { headers }
+    );
 
+    await new Promise((r) => setTimeout(r, 200)); // delay 200ms
+
+    const summary = await axios.get(
+      `${BASE_URL}/v1/stock/summary?symbol=${symbol}&region=${region}`,
+      { headers }
+    );
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    const analysis = await axios.get(
+      `${BASE_URL}/v1/stock/analysis?symbol=${symbol}&region=${region}`,
+      { headers }
+    );
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    const stats = await axios.get(
+      `${BASE_URL}/v1/stock/key-statistics?symbol=${symbol}&region=${region}`,
+      { headers }
+    );
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    const hist = await axios.get(
+      `${BASE_URL}/v1/stock/historical-data?symbol=${symbol}&interval=1d&region=${region}&period1=0&period2=${nowEpoch}`,
+      { headers }
+    );
+
+    // Process responses
     const summaryData = summary.data;
     const profileData = profile.data;
     const analysisData = analysis.data;
@@ -63,7 +90,9 @@ export default async function handler(
       paese: profileData.country,
     });
   } catch (e: any) {
-    console.error('[ERRORE BLOCCO 1]', e.message);
-    res.status(500).json({ error: 'Errore recupero BLOCCO 1' });
+    console.error('[ERRORE BLOCCO 1]', e?.response?.status, e?.response?.data);
+    res.status(500).json({
+      error: `Errore BLOCCO 1: ${e?.response?.status} - ${e?.response?.data?.message || e.message}`,
+    });
   }
 }
