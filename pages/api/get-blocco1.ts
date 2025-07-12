@@ -1,11 +1,13 @@
-// /api/get-blocco1.ts
-
+import type { NextApiRequest, NextApiResponse } from 'next';
 import axios from 'axios';
 
 const API_KEY = process.env.RAPIDAPI_KEY!;
 const BASE_URL = 'https://live-stock-market.p.rapidapi.com';
 
-export default async function handler(req, res) {
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
   const { symbol, region = 'US' } = req.query;
 
   const headers = {
@@ -28,7 +30,7 @@ export default async function handler(req, res) {
     const statsData = stats.data;
     const histData = hist.data;
 
-    const prices = histData.prices?.map(p => p.close).filter(Boolean) || [];
+    const prices = histData.prices?.map((p: any) => p.close).filter(Boolean) || [];
     const maxPrice = Math.max(...prices);
     const minPrice = Math.min(...prices);
     const pctChange = (a: number, b: number) => b ? ((a - b) / b) * 100 : null;
@@ -39,7 +41,7 @@ export default async function handler(req, res) {
       exchange: summaryData.exchangeName,
       settore: profileData.sector,
       industria: profileData.industry,
-      indicePrimario: null, // manual override
+      indicePrimario: null,
       indiciSecondari: null,
       prezzoAttuale: summaryData.regularMarketPrice,
       prezzoTarget: analysisData.targetMeanPrice,
@@ -60,7 +62,7 @@ export default async function handler(req, res) {
       valuta: summaryData.currency,
       paese: profileData.country,
     });
-  } catch (e) {
+  } catch (e: any) {
     console.error('[ERRORE BLOCCO 1]', e.message);
     res.status(500).json({ error: 'Errore recupero BLOCCO 1' });
   }
