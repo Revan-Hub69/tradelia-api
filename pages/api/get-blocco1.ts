@@ -30,16 +30,6 @@ function calculateReturns(series: any[], days: number): number | null {
   return ((latest - past) / past) * 100;
 }
 
-function calculateHighLow(series: any[]): { max: number | null; min: number | null } {
-  if (!series || series.length === 0) return { max: null, min: null };
-  const highs = series.map(d => parseFloat(d.high)).filter(v => !isNaN(v));
-  const lows = series.map(d => parseFloat(d.low)).filter(v => !isNaN(v));
-  return {
-    max: Math.max(...highs),
-    min: Math.min(...lows),
-  };
-}
-
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { symbol = '' } = req.query;
   if (!symbol || typeof symbol !== 'string') {
@@ -47,33 +37,34 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const [profile, quote, rating, ratios] = await Promise.all([
-      fetchFMP(`profile/${symbol}?`),
-      fetchFMP(`quote/${symbol}?`),
-      fetchFMP(`rating/${symbol}?`),
-      fetchFMP(`ratios-ttm/${symbol}?`),
+    const [profile, quote, rating, keyStats] = await Promise.all([
+      fetchFMP(`profile/${symbol}?`),                      // ISIN, Exchange, Settore, Industria, Sede, IPO
+      fetchFMP(`quote/${symbol}?`),                        // Prezzo, Market Cap, Numero Azioni
+      fetchFMP(`rating/${symbol}?`),                       // Rating analisti
+      fetchFMP(`key-metrics-ttm/${symbol}?`),              // Free Float (se disponibile)
     ]);
 
     const [priceData, timeSeriesData] = await Promise.all([
-      fetchTwelve(`quote?symbol=${symbol}`),
-      fetchTwelve(`time_series?symbol=${symbol}&interval=1day&outputsize=30`),
+      fetchTwelve(`quote?symbol=${symbol}`),              // Prezzo attuale, variazione 24h
+      fetchTwelve(`time_series?symbol=${symbol}&interval=1day&outputsize=30`),  // Serie per var. 7gg e 30gg
     ]);
 
     const series = timeSeriesData?.values || [];
-    const var7d = calculateReturns(series, 7);
-    const var30d = calculateReturns(series, 30);
-    const { max, min } = calculateHighLow(series);
+    const variation_7d = calculateReturns(series, 7);
+    const variation_30d = calculateReturns(series, 30);
 
     return res.status(200).json({
+      ticker: symbol,
       profile: profile[0] || null,
       quote: quote[0] || null,
       rating: rating[0] || null,
-      ratios: ratios[0] || null,
+      keyStats: keyStats[0] || null,
       price: priceData || null,
-      variation_7d: var7d,
-      variation_30d: var30d,
-      max_30d: max,
-      min_30d: min,
+      variation_7d,
+      variation_30d,
+      max_all_time: null,  // scraping esterno
+      min_all_time: null,  // scraping esterno
+      note_max_min: "Dati massimo/minimo storico esclusi perché saranno ottenuti via scraping esterno"
     });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
