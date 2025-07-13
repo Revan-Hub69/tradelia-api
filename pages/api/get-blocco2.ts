@@ -42,9 +42,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (peerRatios[0]) {
         peerData.push({
           symbol: peer,
-          pe: peerRatios[0].peRatio,
-          evEbitda: peerRatios[0].evToEbitda,
-          pb: peerRatios[0].priceToBookRatio
+          pe: peerRatios[0].priceEarningsRatioTTM,
+          evEbitda: peerRatios[0].enterpriseValueMultipleTTM,
+          pb: peerRatios[0].priceToBookRatioTTM
         });
       }
     }
@@ -55,15 +55,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(200).json({
       symbol,
       multiples: {
-        peTrailing: r.peRatio,
-        peForward: r.forwardPE,
-        peg: r.pegRatio,
-        pb: r.priceToBookRatio,
-        ps: r.priceToSalesRatio,
-        evEbitda: r.evToEbitda,
-        pFcf: r.priceToFreeCashFlowsRatio,
-        evRevenue: r.evToSales,
-        evFcf: r.evToFreeCashFlow
+        peTrailing: r.priceEarningsRatioTTM,
+        peForward: null,
+        peg: r.pegRatioTTM,
+        pb: r.priceToBookRatioTTM,
+        ps: r.priceToSalesRatioTTM,
+        evEbitda: r.enterpriseValueMultipleTTM,
+        pFcf: r.priceToFreeCashFlowsRatioTTM,
+        evRevenue: null,
+        evFcf: null
       },
       dcf: {
         fairValueBase: dcfValue,
@@ -72,9 +72,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       },
       peers: peerData,
       historicalMultiples: {
-        pe: extractHistoricalSeries('peRatio'),
-        evEbitda: extractHistoricalSeries('evToEbitda'),
-        pFcf: extractHistoricalSeries('priceToFreeCashFlowsRatio')
+        pe: extractHistoricalSeries('priceEarningsRatioTTM'),
+        evEbitda: extractHistoricalSeries('enterpriseValueMultipleTTM'),
+        pFcf: extractHistoricalSeries('priceToFreeCashFlowsRatioTTM')
       }
     });
 
